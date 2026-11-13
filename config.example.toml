@@ -7,6 +7,9 @@ bucket = "hydromancer-reservoir"
 cache_dir = "./data/cache"
 catalog_path = "./data/catalog.sqlite3"
 
+[lark]
+webhook_url = "https://open.larksuite.com/open-apis/bot/v2/hook/your-webhook-token"
+
 [clickhouse]
 host = "127.0.0.1"
 port = 9000

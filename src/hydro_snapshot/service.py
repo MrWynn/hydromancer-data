@@ -54,6 +54,39 @@ class CostEstimate:
         return self.objects_per_day * self.days
 
 
+@dataclass(frozen=True)
+class ExactCost:
+    dataset: str
+    samples: Sequence[CostSample]
+    as_of: date
+
+    @property
+    def available_samples(self) -> Sequence[CostSample]:
+        return [item for item in self.samples if item.object_count]
+
+    @property
+    def total_bytes(self) -> int:
+        return sum(item.compressed_bytes for item in self.available_samples)
+
+    @property
+    def total_objects(self) -> int:
+        return sum(item.object_count for item in self.available_samples)
+
+    def status(self, sample: CostSample) -> str:
+        if sample.object_count:
+            return "available"
+        if sample.snapshot_date > self.as_of:
+            return "future"
+        available_dates = [
+            item.snapshot_date
+            for item in self.available_samples
+            if item.snapshot_date <= self.as_of
+        ]
+        if available_dates and sample.snapshot_date > max(available_dates):
+            return "pending"
+        return "missing"
+
+
 OPTIONAL_DEFAULTS = {
     "account_mode": None,
     "is_unified": False,
@@ -160,6 +193,32 @@ class SnapshotService:
                 % ", ".join(str(item.snapshot_date) for item in samples)
             )
         return CostEstimate(dataset=dataset, days=days, samples=samples)
+
+    def exact_cost(
+        self,
+        start: date,
+        end: date,
+        dataset: str,
+        as_of: Optional[date] = None,
+    ) -> ExactCost:
+        if end < start:
+            raise ValueError("End date must not be before start date")
+        spec = DATASETS[dataset]
+        samples: List[CostSample] = []
+        for snapshot_date in date_range(start, end):
+            objects = self.s3.list_objects(spec, snapshot_date)
+            samples.append(
+                CostSample(
+                    snapshot_date=snapshot_date,
+                    compressed_bytes=sum(item.size for item in objects),
+                    object_count=len(objects),
+                )
+            )
+        return ExactCost(
+            dataset=dataset,
+            samples=samples,
+            as_of=as_of or datetime.now(timezone.utc).date(),
+        )
 
     def objects_for_range(
         self, start: date, end: date, datasets: Sequence[str]

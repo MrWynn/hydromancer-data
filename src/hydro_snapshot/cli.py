@@ -10,7 +10,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover
 
 from .config import load_config
 from .constants import DATASETS
-from .service import CostEstimate, InspectionRecord, SnapshotService
+from .service import CostEstimate, ExactCost, InspectionRecord, SnapshotService
 from .utils import format_bytes
 
 
@@ -120,6 +120,44 @@ def _cost_text(
     return "\n".join(lines)
 
 
+def _exact_cost_text(
+    exact: ExactCost, usd_per_gb: float = DEFAULT_USD_PER_GB
+) -> str:
+    available = exact.available_samples
+    lines = [
+        "dataset      %s" % exact.dataset,
+        "range        %s day(s), all listed" % len(exact.samples),
+        "AVAILABLE    %.3f GiB  (%s objects across %s days)"
+        % (exact.total_bytes / GIB, exact.total_objects, len(available)),
+        "EGRESS COST  ~$%.2f  (@ $%.2f/GB, requester-pays)"
+        % (exact.total_bytes / GIB * usd_per_gb, usd_per_gb),
+        "",
+        "daily:",
+    ]
+    for sample in exact.samples:
+        lines.append(
+            "  %s  %-9s  %.3f GiB  %s obj"
+            % (
+                sample.snapshot_date,
+                exact.status(sample),
+                sample.compressed_bytes / GIB,
+                sample.object_count,
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "note: available is exact S3 compressed size; pending means an empty "
+            "date after the latest available date through today and may reflect "
+            "publication delay; future dates are not counted.",
+            "",
+            "note: excludes S3 LIST/GET request charges; actual billed cost is "
+            "available from AWS Cost Explorer/CUR after usage.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 @app.command("cost")
 def cost_command(
     dataset: str = typer.Option(..., "--dataset", help="Comma-separated datasets"),
@@ -130,11 +168,27 @@ def cost_command(
         "--usd-per-gb",
         help="Data transfer rate; default is same-region S3 to EC2",
     ),
+    exact: bool = typer.Option(
+        False,
+        "--exact",
+        help="List every date and report exact currently available S3 size",
+    ),
     config: Path = typer.Option(Path("config.toml"), exists=True, dir_okay=False),
 ) -> None:
     service = _service(config)
+    start_date = _date(start)
+    end_date = _date(end)
+    if exact:
+        reports = [
+            service.exact_cost(start_date, end_date, name)
+            for name in _datasets(dataset)
+        ]
+        typer.echo(
+            "\n\n".join(_exact_cost_text(item, usd_per_gb) for item in reports)
+        )
+        return
     estimates = [
-        service.estimate_cost(_date(start), _date(end), name)
+        service.estimate_cost(start_date, end_date, name)
         for name in _datasets(dataset)
     ]
     typer.echo("\n\n".join(_cost_text(item, usd_per_gb) for item in estimates))

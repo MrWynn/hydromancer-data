@@ -31,6 +31,16 @@ hydro-snapshot cost \
   --usd-per-gb 0.09
 ```
 
+如需逐日列举 S3 并精确统计当前已有对象的压缩大小，可使用 `--exact`。该模式不会将未来日期或可能尚未发布的日期按零数据计入平均值，也不会下载 Parquet：
+
+```bash
+hydro-snapshot cost \
+  --dataset perp \
+  --start 2026-11-01 \
+  --end 2026-11-30 \
+  --exact
+```
+
 费用输出不包含少量 S3 LIST/GET 请求费。下载后的实际账单金额以 AWS Cost Explorer 或 CUR 为准。
 
 ### 1. 检查源数据
@@ -145,14 +155,24 @@ hydro-snapshot sync \
 同步单日的全部 dataset：
 
 ```bash
-./sync_snapshots.sh 2026-11-10
+./sync_snapshots.sh start 2026-11-10
 ```
 
 同步日期范围，并指定 dataset：
 
 ```bash
-./sync_snapshots.sh 2026-11-01 2026-11-10 perp,spot
+./sync_snapshots.sh start 2026-11-01 2026-11-10 perp,spot
 ```
+
+查看、停止或重启后台任务：
+
+```bash
+./sync_snapshots.sh status
+./sync_snapshots.sh stop
+./sync_snapshots.sh restart
+```
+
+脚本会阻止重复启动。任务正常完成、手动停止或异常退出时，会通过 `config.toml` 中配置的 `[lark].webhook_url` 发送通知。`restart` 默认复用上一次启动参数，也可以在命令后提供新的日期和 dataset。
 
 脚本会在后台依次执行源数据检查、dry-run、下载与同步、最终状态查询。启动命令会立即返回，退出当前 shell 后任务仍会继续运行。
 

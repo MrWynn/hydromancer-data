@@ -15,7 +15,7 @@ from hydro_snapshot.config import (
 )
 from hydro_snapshot.constants import ALLOWED_TABLES, DATASETS
 from hydro_snapshot.s3_store import S3Store
-from hydro_snapshot.cli import GIB, _cost_text
+from hydro_snapshot.cli import GIB, _cost_text, _exact_cost_text
 from hydro_snapshot.service import SnapshotService
 from hydro_snapshot.utils import date_range, format_bytes
 
@@ -223,6 +223,34 @@ class CoreTests(unittest.TestCase):
                 service.estimate_cost(start, start, "perp")
             )
             self.assertIn("per day      1.000 GiB  (1 object)", single_day_output)
+
+    def test_exact_cost_lists_every_day_without_catalog(self):
+        start = date(2026, 11, 10)
+        end = date(2026, 11, 14)
+        service = SnapshotService.__new__(SnapshotService)
+        service._s3 = CostS3(
+            {
+                start: [GIB],
+                date(2026, 11, 12): [2 * GIB],
+            }
+        )
+
+        exact = service.exact_cost(
+            start, end, "perp", as_of=date(2026, 11, 13)
+        )
+
+        self.assertEqual(len(exact.samples), 5)
+        self.assertEqual(exact.total_bytes, 3 * GIB)
+        self.assertEqual(exact.total_objects, 2)
+        self.assertEqual(
+            [exact.status(item) for item in exact.samples],
+            ["available", "missing", "available", "pending", "future"],
+        )
+        output = _exact_cost_text(exact, 0.09)
+        self.assertIn("range        5 day(s), all listed", output)
+        self.assertIn("AVAILABLE    3.000 GiB  (2 objects across 2 days)", output)
+        self.assertIn("2026-11-13  pending", output)
+        self.assertIn("2026-11-14  future", output)
 
     def test_clickhouse_table_allowlist(self):
         config = ClickHouseConfig(
