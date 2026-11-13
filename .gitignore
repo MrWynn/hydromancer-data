@@ -1,0 +1,14 @@
+config.toml
+.venv/
+__pycache__/
+*.py[cod]
+*.swp
+.pytest_cache/
+.mypy_cache/
+data/
+logs/
+.run/
+dist/
+build/
+*.egg-info/
+
