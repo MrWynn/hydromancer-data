@@ -238,6 +238,27 @@ class IngestionCatalog:
             return None
         return path
 
+    def delete_download(
+        self, dataset: str, source_bucket: str, source_key: str, etag: str
+    ) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT local_path FROM hyperliquid_s3_downloads "
+                "WHERE dataset = ? AND source_bucket = ? AND source_key = ? "
+                "AND etag = ?",
+                (dataset, source_bucket, source_key, etag),
+            ).fetchone()
+            if row is None:
+                return False
+            Path(row["local_path"]).unlink(missing_ok=True)
+            connection.execute(
+                "DELETE FROM hyperliquid_s3_downloads "
+                "WHERE dataset = ? AND source_bucket = ? AND source_key = ? "
+                "AND etag = ?",
+                (dataset, source_bucket, source_key, etag),
+            )
+        return True
+
 
 class NodeFillsS3:
     def __init__(self, config: AwsConfig, client: Any = None):
@@ -397,6 +418,9 @@ class NodeFillsService:
                 if task is not None:
                     self._validate_source(item, task)
                     if task.status == "completed":
+                        self.catalog.delete_download(
+                            item.dataset, item.bucket, item.key, item.etag
+                        )
                         messages.append("skip %s: already ingested" % item.key)
                         continue
                 if dry_run:
@@ -414,6 +438,9 @@ class NodeFillsService:
                     continue
                 path = self._download(item)
                 rows = self._ingest_file(item, path, task)
+                self.catalog.delete_download(
+                    item.dataset, item.bucket, item.key, item.etag
+                )
                 messages.append("sync %s: %s fills" % (item.key, rows))
         return messages
 

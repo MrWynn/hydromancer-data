@@ -61,7 +61,9 @@ class FakeClickHouse:
     def get_task(self, dataset, snapshot_date):
         if not self.ingested:
             return None
-        return SimpleNamespace(status="completed")
+        return SimpleNamespace(
+            status="completed", source_key="key", source_etag="etag"
+        )
 
 
 class ExplodingS3:
@@ -172,13 +174,21 @@ class CoreTests(unittest.TestCase):
     def test_successful_sync_skips_before_s3(self):
         with tempfile.TemporaryDirectory() as raw_root:
             root = Path(raw_root)
+            item = S3Object("perp", TEST_DATE, "key", "etag", 3, 100, 200)
+            local_path = root / "cached.parquet"
+            local_path.write_bytes(b"abc")
+            catalog = Catalog(root / "catalog.sqlite3")
+            catalog.record_download(item, local_path)
             service = SnapshotService(
                 make_config(root),
+                catalog=catalog,
                 s3=ExplodingS3(),
                 clickhouse=FakeClickHouse(ingested=True),
             )
             messages = service.sync(TEST_DATE, TEST_DATE, ["perp"])
             self.assertEqual(messages, ["skip perp 2026-11-09: already ingested"])
+            self.assertFalse(local_path.exists())
+            self.assertFalse(catalog.delete_download(item.key, item.etag))
 
     def test_inspect_reuses_cached_s3_listing(self):
         with tempfile.TemporaryDirectory() as raw_root:

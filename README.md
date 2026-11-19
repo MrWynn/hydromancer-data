@@ -103,9 +103,10 @@ hyperliquid-etl sync \
 2. 跳过已经完成的 dataset/date；
 3. 复用本地已下载且校验有效的 Parquet 文件，否则从 S3 下载；
 4. 按 batch 写入对应的 ClickHouse 快照表；
-5. 将进度写入 `hydromancer_sync_tasks`。
+5. 将进度写入 `hydromancer_sync_tasks`；
+6. 标记为 `completed` 后删除对应的 Parquet cache 和 SQLite download 记录。
 
-如果同步中断，重新执行相同命令会从任务表记录的 batch 继续。成功完成后再次执行同一 dataset/date，会在访问 S3 前直接跳过。
+如果同步中断，重新执行相同命令会从任务表记录的 batch 继续，未完成对象的 cache 会保留。成功完成后再次执行同一 dataset/date，会在访问 S3 前直接跳过并清理可能残留的 cache。
 
 ### 4. 查询同步状态
 
@@ -193,13 +194,13 @@ hyperliquid-etl node-fills status \
   --to 2026-11-01
 ```
 
-同步按日期、小时顺序处理。完成对象再次执行时会直接跳过；失败对象从最近一次成功写入的 JSONL 行恢复。LZ4 文件缓存在 `storage.cache_dir` 下，S3 扫描和下载状态记录在现有 SQLite catalog 中。
+同步按日期、小时顺序处理。对象写入成功并标记为 `completed` 后，会删除对应的本地 LZ4 cache 和 SQLite download 记录；失败对象保留 cache，并从最近一次成功写入的 JSONL 行恢复。S3 扫描和对象元数据继续保存在 SQLite catalog 中，完成对象再次执行时会直接跳过。
 
 完整数据模型、幂等边界和验收方式见 [docs/node-fills-by-block-design.md](docs/node-fills-by-block-design.md)。
 
 ## 后台同步脚本
 
-同步单日的全部 dataset：
+默认同步单日的三个 snapshots dataset（`perp,spot,account_values`）：
 
 ```bash
 ./sync_snapshots.sh start 2026-11-10
@@ -209,6 +210,18 @@ hyperliquid-etl node-fills status \
 
 ```bash
 ./sync_snapshots.sh start 2026-11-01 2026-11-10 perp,spot
+```
+
+只同步 Hyperliquid fills：
+
+```bash
+./sync_snapshots.sh start 2026-11-01 2026-11-01 node-fills
+```
+
+在同一个后台任务中依次同步 snapshots 和 fills：
+
+```bash
+./sync_snapshots.sh start 2026-11-01 2026-11-10 perp,spot,account_values,node-fills
 ```
 
 查看、停止或重启后台任务：
@@ -221,7 +234,7 @@ hyperliquid-etl node-fills status \
 
 脚本会阻止重复启动。任务正常完成、手动停止或异常退出时，会通过 `config.toml` 中配置的 `[lark].webhook_url` 发送通知。`restart` 默认复用上一次启动参数，也可以在命令后提供新的日期和 dataset。
 
-脚本会在后台依次执行源数据检查、dry-run、下载与同步、最终状态查询。启动命令会立即返回，退出当前 shell 后任务仍会继续运行。
+脚本会在后台依次执行源数据检查、dry-run、下载与同步、最终状态查询。组合任务先处理 snapshots，再处理 fills；任一步失败时任务以失败状态退出，再次运行会跳过已完成的数据。启动命令会立即返回，退出当前 shell 后任务仍会继续运行。
 
 每次运行的完整输出保存在 `logs/` 下的独立日志文件中。启动时会显示具体日志路径，可以实时查看：
 

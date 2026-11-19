@@ -18,8 +18,11 @@ usage() {
     echo "       $0 status"
     echo "       $0 stop"
     echo "       $0 restart [START_DATE [END_DATE] [DATASETS]]"
+    echo "Datasets: perp, spot, account_values, node-fills"
     echo "Example: $0 start 2026-11-10"
     echo "Example: $0 start 2026-11-01 2026-11-10 perp,spot"
+    echo "Example: $0 start 2026-11-01 2026-11-01 node-fills"
+    echo "Example: $0 start 2026-11-01 2026-11-01 perp,spot,node-fills"
 }
 
 log() {
@@ -29,6 +32,40 @@ log() {
 run_cli() {
     PYTHONPATH="${PROJECT_DIR}/src" "${PYTHON}" -m hyperliquid_etl.cli "$@" \
         --config "${CONFIG}"
+}
+
+parse_datasets() {
+    dataset_list="$1"
+    case "${dataset_list}" in
+        ""|,*|*,|*,,*)
+            echo "Datasets must be a non-empty comma-separated list" >&2
+            return 2
+            ;;
+    esac
+
+    snapshot_datasets=""
+    node_fills_enabled=0
+    remaining_datasets="${dataset_list},"
+    while [ -n "${remaining_datasets}" ]; do
+        dataset="${remaining_datasets%%,*}"
+        remaining_datasets="${remaining_datasets#*,}"
+        case "${dataset}" in
+            perp|spot|account_values)
+                case ",${snapshot_datasets}," in
+                    *",${dataset},"*) ;;
+                    *) snapshot_datasets="${snapshot_datasets:+${snapshot_datasets},}${dataset}" ;;
+                esac
+                ;;
+            node-fills)
+                node_fills_enabled=1
+                ;;
+            *)
+                echo "Unknown dataset: ${dataset}" >&2
+                echo "Allowed datasets: perp, spot, account_values, node-fills" >&2
+                return 2
+                ;;
+        esac
+    done
 }
 
 state_value() {
@@ -99,7 +136,7 @@ run_worker() {
             result="异常退出（exit code ${exit_code}）"
         fi
         log "Sync job ${result}: from=${start_date} to=${end_date} datasets=${datasets}"
-        notification="$(printf 'Hydromancer sync %s\nfrom: %s\nto: %s\ndatasets: %s\nlog: %s' \
+        notification="$(printf 'Hyperliquid ETL sync %s\nfrom: %s\nto: %s\ndatasets: %s\nlog: %s' \
             "${result}" "${start_date}" "${end_date}" "${datasets}" "${log_file}")"
         notify_lark "${notification}"
         if [ -f "${PID_FILE}" ] && [ "$(sed -n '1p' "${PID_FILE}")" = "$$" ]; then
@@ -111,33 +148,61 @@ run_worker() {
     trap 'exit 143' TERM INT
 
     log "Sync job started: from=${start_date} to=${end_date} datasets=${datasets}"
+    parse_datasets "${datasets}"
 
-    log "Step 1/4: refreshing source inspection"
-    run_cli inspect \
-        --from "${start_date}" \
-        --to "${end_date}" \
-        --dataset "${datasets}" \
-        --refresh
+    if [ -n "${snapshot_datasets}" ]; then
+        log "Snapshots step 1/4: refreshing source inspection"
+        run_cli inspect \
+            --from "${start_date}" \
+            --to "${end_date}" \
+            --dataset "${snapshot_datasets}" \
+            --refresh
 
-    log "Step 2/4: checking sync plan"
-    run_cli sync \
-        --from "${start_date}" \
-        --to "${end_date}" \
-        --dataset "${datasets}" \
-        --dry-run
+        log "Snapshots step 2/4: checking sync plan"
+        run_cli sync \
+            --from "${start_date}" \
+            --to "${end_date}" \
+            --dataset "${snapshot_datasets}" \
+            --dry-run
 
-    log "Step 3/4: downloading and syncing"
-    run_cli sync \
-        --from "${start_date}" \
-        --to "${end_date}" \
-        --dataset "${datasets}" \
-        --yes
+        log "Snapshots step 3/4: downloading and syncing"
+        run_cli sync \
+            --from "${start_date}" \
+            --to "${end_date}" \
+            --dataset "${snapshot_datasets}" \
+            --yes
 
-    log "Step 4/4: reading final status"
-    run_cli status \
-        --from "${start_date}" \
-        --to "${end_date}" \
-        --dataset "${datasets}"
+        log "Snapshots step 4/4: reading final status"
+        run_cli status \
+            --from "${start_date}" \
+            --to "${end_date}" \
+            --dataset "${snapshot_datasets}"
+    fi
+
+    if [ "${node_fills_enabled}" -eq 1 ]; then
+        log "Node fills step 1/4: refreshing source inspection"
+        run_cli node-fills inspect \
+            --from "${start_date}" \
+            --to "${end_date}" \
+            --refresh
+
+        log "Node fills step 2/4: checking sync plan"
+        run_cli node-fills sync \
+            --from "${start_date}" \
+            --to "${end_date}" \
+            --dry-run
+
+        log "Node fills step 3/4: downloading and syncing"
+        run_cli node-fills sync \
+            --from "${start_date}" \
+            --to "${end_date}" \
+            --yes
+
+        log "Node fills step 4/4: reading final status"
+        run_cli node-fills status \
+            --from "${start_date}" \
+            --to "${end_date}"
+    fi
 }
 
 validate_start_args() {
@@ -150,6 +215,7 @@ validate_start_args() {
         echo "Dates must use YYYY-MM-DD format" >&2
         return 2
     fi
+    parse_datasets "${3:-$DEFAULT_DATASETS}" || return $?
     if [ ! -x "${PYTHON}" ]; then
         echo "Python not found: ${PYTHON}" >&2
         return 1

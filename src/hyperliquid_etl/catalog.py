@@ -176,3 +176,19 @@ class Catalog:
             return None
         return path
 
+    def delete_download(self, object_key: str, etag: str) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT local_path FROM downloads "
+                "WHERE object_key = ? AND etag = ?",
+                (object_key, etag),
+            ).fetchone()
+            if row is None:
+                return False
+            Path(row["local_path"]).unlink(missing_ok=True)
+            connection.execute(
+                "DELETE FROM downloads WHERE object_key = ? AND etag = ?",
+                (object_key, etag),
+            )
+        return True
+

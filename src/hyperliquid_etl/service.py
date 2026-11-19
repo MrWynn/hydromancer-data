@@ -260,6 +260,7 @@ class SnapshotService:
                 spec = DATASETS[name]
                 task = self.clickhouse.get_task(name, snapshot_date)
                 if task is not None and task.status == "completed":
+                    self.catalog.delete_download(task.source_key, task.source_etag)
                     messages.append("skip %s %s: already ingested" % (name, snapshot_date))
                     continue
                 objects = self._scan_one(spec, snapshot_date)
@@ -287,6 +288,7 @@ class SnapshotService:
                     continue
                 local_path = self.download([item])[0]
                 rows = self._ingest_file(spec, item, local_path, task)
+                self.catalog.delete_download(item.key, item.etag)
                 messages.append("sync %s %s: %s rows" % (name, snapshot_date, rows))
         return messages
 

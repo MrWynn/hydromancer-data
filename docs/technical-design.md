@@ -48,7 +48,7 @@ hyperliquid-etl download --from DATE --to DATE [--dataset ...] [--yes]
 hyperliquid-etl sync --from DATE --to DATE [--dataset ...] [--dry-run] [--yes]
 ```
 
-同步首先查询 ClickHouse 任务表。状态为 `completed` 的 dataset/date 在任何 S3 请求前跳过；未完成任务从记录的 batch checkpoint 继续。未同步数据优先使用本地 Parquet；本地没有时只下载一次。
+同步首先查询 ClickHouse 任务表。状态为 `completed` 的 dataset/date 在任何 S3 请求前跳过，并清理可能残留的本地 cache；未完成任务从记录的 batch checkpoint 继续。未同步数据优先使用本地 Parquet；本地没有时只下载一次。任务成功标记为 `completed` 后，删除对应的 Parquet cache 和 SQLite download 记录；失败时保留它们用于断点续传。
 
 ### status
 
@@ -92,13 +92,14 @@ DDL 位于 `sql/clickhouse_tables.sql`，必须由用户手动执行。程序不
 
 每个 dataset/date 按以下顺序处理：
 
-1. 查询任务表；最新状态为 `completed` 时跳过。
+1. 查询任务表；最新状态为 `completed` 时清理可能残留的 cache 并跳过。
 2. 从缓存目录取得 Parquet，必要时下载。
 3. 校验未完成任务记录的 key、ETag、大小和总行数仍与源文件一致。
 4. 使用任务首次运行时记录的固定 batch 大小分批读取 Parquet。
 5. 从 `next_batch` 继续，直接列式 INSERT 正式表。
 6. 每个 batch 成功后追加一条 `running` checkpoint。
 7. 全部逻辑行写完后追加 `completed` 状态；异常时追加 `failed` 状态。
+8. `completed` 成功写入后删除对应的 Parquet cache 和 SQLite download 记录。
 
 如果 ClickHouse 已接收一个 batch、但客户端没有收到成功响应，该 batch 可能被重试。重试会生成更大的 `updated_at`，正式表的 `ReplacingMergeTree(updated_at)` 会按排序键在后台 merge 时保留最新版本；merge 完成前普通查询可能短暂看到重复，要求即时准确时必须使用 `FINAL`。
 

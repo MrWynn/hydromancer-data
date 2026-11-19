@@ -275,6 +275,12 @@ class NodeFillsTests(unittest.TestCase):
             for names, columns in clickhouse.inserted_batches:
                 ingested_at = columns[names.index("ingested_at")]
                 self.assertEqual(len(set(ingested_at)), 1)
+            self.assertFalse(local_path.exists())
+            self.assertFalse(
+                catalog.delete_download(
+                    item.dataset, item.bucket, item.key, item.etag
+                )
+            )
 
             second = service.sync(TEST_DATE, TEST_DATE)
             self.assertEqual(second, ["skip %s: already ingested" % item.key])
@@ -312,6 +318,8 @@ class NodeFillsTests(unittest.TestCase):
             self.assertEqual(clickhouse.task.next_checkpoint, 0)
             self.assertEqual(clickhouse.task.source_records_read, 0)
             self.assertEqual(clickhouse.task.output_rows_written, 0)
+            self.assertTrue(local_path.exists())
+            self.assertEqual(catalog.downloaded_path(item), local_path)
 
     def test_ddl_uses_ingested_at_and_comments_every_field(self):
         sql = (

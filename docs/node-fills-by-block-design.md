@@ -228,7 +228,7 @@ RequestPayer=requester
 建议缓存路径：
 
 ```text
-data/node_fills_by_block/node_fills_by_block/hourly/YYYYMMDD/H.lz4
+data/cache/hl-mainnet-node-data/node_fills_by_block/hourly/YYYYMMDD/H.lz4
 ```
 
 下载规则：
@@ -238,7 +238,7 @@ data/node_fills_by_block/node_fills_by_block/hourly/YYYYMMDD/H.lz4
 3. 校验本地大小等于 S3 `ContentLength`；
 4. `fsync` 后原子改名；
 5. ETag 只作为 source identity，不假设它一定是内容 MD5；
-6. 完成对象可按保留策略清理本地缓存，S3 仍是原始事实源。
+6. 对象标记为 `completed` 后立即清理本地缓存和 SQLite download 记录，S3 仍是原始事实源；失败对象保留缓存用于恢复。
 
 ## 8. 解析和写入流程
 
@@ -277,6 +277,7 @@ ClickHouse 普通 MergeTree INSERT 不提供成交表和任务表之间的跨表
 1. 写 fill batch；
 2. 成功后写任务 checkpoint；
 3. 全部源记录完成并校验通过后，将对象标记为 `completed`。
+4. `completed` 成功写入后，删除该对象的本地 LZ4 cache 和 SQLite download 记录；失败对象保留 cache 用于断点续传。重跑已完成对象时也会清理历史残留 cache，不重新 GET S3。
 
 进程可能在 fill INSERT 成功、checkpoint 写入前中断，因此重试可能产生物理重复。成交表使用 `ReplacingMergeTree(ingested_at)`：
 
