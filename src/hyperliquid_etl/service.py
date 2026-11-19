@@ -9,7 +9,7 @@ from .clickhouse_store import ClickHouseStore, SyncTask
 from .config import AppConfig
 from .constants import COMMON_COLUMNS, DATASETS, DatasetSpec
 from .s3_store import S3Store
-from .utils import date_range
+from .utils import date_range, remove_empty_directory
 
 
 @dataclass(frozen=True)
@@ -260,7 +260,13 @@ class SnapshotService:
                 spec = DATASETS[name]
                 task = self.clickhouse.get_task(name, snapshot_date)
                 if task is not None and task.status == "completed":
-                    self.catalog.delete_download(task.source_key, task.source_etag)
+                    if not dry_run:
+                        self.catalog.delete_download(
+                            task.source_key, task.source_etag
+                        )
+                        remove_empty_directory(
+                            (self.config.storage.cache_dir / task.source_key).parent
+                        )
                     messages.append("skip %s %s: already ingested" % (name, snapshot_date))
                     continue
                 objects = self._scan_one(spec, snapshot_date)
@@ -289,6 +295,7 @@ class SnapshotService:
                 local_path = self.download([item])[0]
                 rows = self._ingest_file(spec, item, local_path, task)
                 self.catalog.delete_download(item.key, item.etag)
+                remove_empty_directory(local_path.parent)
                 messages.append("sync %s %s: %s rows" % (name, snapshot_date, rows))
         return messages
 

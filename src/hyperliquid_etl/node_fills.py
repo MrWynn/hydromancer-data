@@ -12,7 +12,7 @@ from typing import Any, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 from .clickhouse_store import ClickHouseStore, IngestionTask
 from .config import AppConfig, AwsConfig
-from .utils import date_range
+from .utils import date_range, remove_empty_directory
 
 
 DATASET = "node_fills_by_block"
@@ -418,9 +418,10 @@ class NodeFillsService:
                 if task is not None:
                     self._validate_source(item, task)
                     if task.status == "completed":
-                        self.catalog.delete_download(
-                            item.dataset, item.bucket, item.key, item.etag
-                        )
+                        if not dry_run:
+                            self.catalog.delete_download(
+                                item.dataset, item.bucket, item.key, item.etag
+                            )
                         messages.append("skip %s: already ingested" % item.key)
                         continue
                 if dry_run:
@@ -442,6 +443,14 @@ class NodeFillsService:
                     item.dataset, item.bucket, item.key, item.etag
                 )
                 messages.append("sync %s: %s fills" % (item.key, rows))
+            if not dry_run:
+                remove_empty_directory(
+                    (
+                        self.config.storage.cache_dir
+                        / objects[0].bucket
+                        / objects[0].key
+                    ).parent
+                )
         return messages
 
     def status(self, start: date, end: date) -> List[IngestionTask]:

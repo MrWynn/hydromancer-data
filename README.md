@@ -106,7 +106,7 @@ hyperliquid-etl sync \
 5. 将进度写入 `hydromancer_sync_tasks`；
 6. 标记为 `completed` 后删除对应的 Parquet cache 和 SQLite download 记录。
 
-如果同步中断，重新执行相同命令会从任务表记录的 batch 继续，未完成对象的 cache 会保留。成功完成后再次执行同一 dataset/date，会在访问 S3 前直接跳过并清理可能残留的 cache。
+如果同步中断，重新执行相同命令会从任务表记录的 batch 继续，未完成对象的 cache 会保留。成功完成后再次执行同一 dataset/date，会在访问 S3 前直接跳过并清理可能残留的 cache。文件清理后仅对其日期目录执行非递归 `rmdir`；目录非空时保留，`--dry-run` 不执行任何文件或目录清理。
 
 ### 4. 查询同步状态
 
@@ -194,7 +194,7 @@ hyperliquid-etl node-fills status \
   --to 2026-11-01
 ```
 
-同步按日期、小时顺序处理。对象写入成功并标记为 `completed` 后，会删除对应的本地 LZ4 cache 和 SQLite download 记录；失败对象保留 cache，并从最近一次成功写入的 JSONL 行恢复。S3 扫描和对象元数据继续保存在 SQLite catalog 中，完成对象再次执行时会直接跳过。
+同步按日期、小时顺序处理。对象写入成功并标记为 `completed` 后，会删除对应的本地 LZ4 cache 和 SQLite download 记录；失败对象保留 cache，并从最近一次成功写入的 JSONL 行恢复。该日期本次发现的对象全部处理成功后，程序仅尝试用 `rmdir` 删除日期目录；存在未完成文件、`.part` 或其他文件时目录会保留。日期目录不是完成标记，完成状态始终以 ClickHouse 任务表为准。S3 扫描和对象元数据继续保存在 SQLite catalog 中，完成对象再次执行时会直接跳过。
 
 完整数据模型、幂等边界和验收方式见 [docs/node-fills-by-block-design.md](docs/node-fills-by-block-design.md)。
 

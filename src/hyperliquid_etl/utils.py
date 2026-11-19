@@ -1,4 +1,6 @@
+import errno
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Iterator
 
 
@@ -18,3 +20,15 @@ def format_bytes(value: int) -> str:
             return "%.2f %s" % (size, unit)
         size /= 1024
     return "%s B" % value
+
+
+def remove_empty_directory(path: Path) -> bool:
+    try:
+        path.rmdir()
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        if exc.errno in (errno.ENOTEMPTY, errno.EEXIST):
+            return False
+        raise
+    return True

@@ -185,6 +185,14 @@ class CoreTests(unittest.TestCase):
                 s3=ExplodingS3(),
                 clickhouse=FakeClickHouse(ingested=True),
             )
+            dry_run_messages = service.sync(
+                TEST_DATE, TEST_DATE, ["perp"], dry_run=True
+            )
+            self.assertEqual(
+                dry_run_messages,
+                ["skip perp 2026-11-09: already ingested"],
+            )
+            self.assertTrue(local_path.exists())
             messages = service.sync(TEST_DATE, TEST_DATE, ["perp"])
             self.assertEqual(messages, ["skip perp 2026-11-09: already ingested"])
             self.assertFalse(local_path.exists())

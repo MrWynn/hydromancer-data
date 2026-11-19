@@ -321,6 +321,41 @@ class NodeFillsTests(unittest.TestCase):
             self.assertTrue(local_path.exists())
             self.assertEqual(catalog.downloaded_path(item), local_path)
 
+    def test_completed_cleanup_preserves_nonempty_date_directory_and_dry_run(self):
+        with tempfile.TemporaryDirectory() as raw_root:
+            root = Path(raw_root)
+            config = make_config(root)
+            item = make_object()
+            local_path = config.storage.cache_dir / item.bucket / item.key
+            local_path.parent.mkdir(parents=True)
+            local_path.write_bytes(b"abc")
+            pending_path = local_path.with_name("1.lz4.part")
+            pending_path.write_bytes(b"pending")
+            catalog = IngestionCatalog(config.storage.catalog_path)
+            catalog.replace_scan(DATASET, TEST_DATE, [item])
+            catalog.record_download(item, local_path)
+            clickhouse = FakeClickHouse()
+            clickhouse.record_ingestion_task(item, "completed", 1, 1, 0)
+            service = NodeFillsService(
+                config,
+                catalog=catalog,
+                s3=ExplodingS3(),
+                clickhouse=clickhouse,
+            )
+
+            service.sync(TEST_DATE, TEST_DATE, dry_run=True)
+            self.assertTrue(local_path.exists())
+            self.assertTrue(local_path.parent.exists())
+
+            service.sync(TEST_DATE, TEST_DATE)
+            self.assertFalse(local_path.exists())
+            self.assertTrue(pending_path.exists())
+            self.assertTrue(local_path.parent.exists())
+
+            pending_path.unlink()
+            service.sync(TEST_DATE, TEST_DATE)
+            self.assertFalse(local_path.parent.exists())
+
     def test_ddl_uses_ingested_at_and_comments_every_field(self):
         sql = (
             Path(__file__).parents[1] / "sql" / "node_fills_by_block_tables.sql"

@@ -99,7 +99,7 @@ DDL 位于 `sql/clickhouse_tables.sql`，必须由用户手动执行。程序不
 5. 从 `next_batch` 继续，直接列式 INSERT 正式表。
 6. 每个 batch 成功后追加一条 `running` checkpoint。
 7. 全部逻辑行写完后追加 `completed` 状态；异常时追加 `failed` 状态。
-8. `completed` 成功写入后删除对应的 Parquet cache 和 SQLite download 记录。
+8. `completed` 成功写入后删除对应的 Parquet cache 和 SQLite download 记录，再以非递归 `rmdir` 尝试删除日期目录；目录非空时保留，`--dry-run` 不清理。
 
 如果 ClickHouse 已接收一个 batch、但客户端没有收到成功响应，该 batch 可能被重试。重试会生成更大的 `updated_at`，正式表的 `ReplacingMergeTree(updated_at)` 会按排序键在后台 merge 时保留最新版本；merge 完成前普通查询可能短暂看到重复，要求即时准确时必须使用 `FINAL`。
 
