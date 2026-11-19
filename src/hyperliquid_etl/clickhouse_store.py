@@ -1,11 +1,17 @@
 import time
 from dataclasses import dataclass
-from datetime import date
-from typing import Dict, Iterable, List, Optional, Sequence
+from datetime import date, datetime
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from .catalog import S3Object
 from .config import ClickHouseConfig
-from .constants import ALLOWED_TABLES, TASK_TABLE, DatasetSpec
+from .constants import (
+    ALLOWED_TABLES,
+    INGESTION_TASK_TABLE,
+    NODE_FILLS_TABLE,
+    TASK_TABLE,
+    DatasetSpec,
+)
 
 
 @dataclass(frozen=True)
@@ -20,6 +26,24 @@ class SyncTask:
     batch_rows: int
     rows_written: int
     status: str
+    last_error: str
+    version: int
+
+
+@dataclass(frozen=True)
+class IngestionTask:
+    dataset: str
+    source_bucket: str
+    source_key: str
+    source_etag: str
+    source_size: int
+    source_last_modified: datetime
+    source_date: date
+    status: str
+    checkpoint_kind: str
+    next_checkpoint: int
+    source_records_read: int
+    output_rows_written: int
     last_error: str
     version: int
 
@@ -199,3 +223,142 @@ class ClickHouseStore:
             last_error=last_error[:1000],
             version=version,
         )
+
+    def get_ingestion_task(
+        self, dataset: str, source_bucket: str, source_key: str
+    ) -> Optional[IngestionTask]:
+        rows = self.client.execute(
+            "SELECT source_etag, source_size, source_last_modified, source_date, "
+            "status, checkpoint_kind, next_checkpoint, source_records_read, "
+            "output_rows_written, last_error, version FROM %s "
+            "WHERE dataset = %%(dataset)s AND source_bucket = %%(source_bucket)s "
+            "AND source_key = %%(source_key)s ORDER BY version DESC LIMIT 1"
+            % self._table(INGESTION_TASK_TABLE),
+            {
+                "dataset": dataset,
+                "source_bucket": source_bucket,
+                "source_key": source_key,
+            },
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        return IngestionTask(
+            dataset=dataset,
+            source_bucket=source_bucket,
+            source_key=source_key,
+            source_etag=row[0],
+            source_size=int(row[1]),
+            source_last_modified=row[2],
+            source_date=row[3],
+            status=row[4],
+            checkpoint_kind=row[5],
+            next_checkpoint=int(row[6]),
+            source_records_read=int(row[7]),
+            output_rows_written=int(row[8]),
+            last_error=row[9],
+            version=int(row[10]),
+        )
+
+    def ingestion_tasks_for_range(
+        self, dataset: str, start: date, end: date
+    ) -> List[IngestionTask]:
+        rows = self.client.execute(
+            "SELECT source_bucket, source_key, "
+            "argMax(source_etag, version), argMax(source_size, version), "
+            "argMax(source_last_modified, version), "
+            "argMax(source_date, version) AS latest_source_date, "
+            "argMax(status, version), argMax(checkpoint_kind, version), "
+            "argMax(next_checkpoint, version), "
+            "argMax(source_records_read, version), "
+            "argMax(output_rows_written, version), "
+            "argMax(last_error, version), max(version) FROM %s "
+            "WHERE dataset = %%(dataset)s "
+            "AND source_date BETWEEN %%(start)s AND %%(end)s "
+            "GROUP BY source_bucket, source_key "
+            "ORDER BY latest_source_date, source_key"
+            % self._table(INGESTION_TASK_TABLE),
+            {"dataset": dataset, "start": start, "end": end},
+        )
+        return [
+            IngestionTask(
+                dataset=dataset,
+                source_bucket=row[0],
+                source_key=row[1],
+                source_etag=row[2],
+                source_size=int(row[3]),
+                source_last_modified=row[4],
+                source_date=row[5],
+                status=row[6],
+                checkpoint_kind=row[7],
+                next_checkpoint=int(row[8]),
+                source_records_read=int(row[9]),
+                output_rows_written=int(row[10]),
+                last_error=row[11],
+                version=int(row[12]),
+            )
+            for row in rows
+        ]
+
+    def record_ingestion_task(
+        self,
+        item: Any,
+        status: str,
+        next_checkpoint: int,
+        source_records_read: int,
+        output_rows_written: int,
+        last_error: str = "",
+    ) -> IngestionTask:
+        version = time.time_ns()
+        self.client.execute(
+            "INSERT INTO %s (dataset, source_bucket, source_key, source_etag, "
+            "source_size, source_last_modified, source_date, status, "
+            "checkpoint_kind, next_checkpoint, source_records_read, "
+            "output_rows_written, last_error, version) VALUES"
+            % self._table(INGESTION_TASK_TABLE),
+            [
+                (
+                    item.dataset,
+                    item.bucket,
+                    item.key,
+                    item.etag,
+                    item.size,
+                    item.last_modified,
+                    item.source_date,
+                    status,
+                    "jsonl_line",
+                    next_checkpoint,
+                    source_records_read,
+                    output_rows_written,
+                    last_error[:1000],
+                    version,
+                )
+            ],
+        )
+        return IngestionTask(
+            dataset=item.dataset,
+            source_bucket=item.bucket,
+            source_key=item.key,
+            source_etag=item.etag,
+            source_size=item.size,
+            source_last_modified=item.last_modified,
+            source_date=item.source_date,
+            status=status,
+            checkpoint_kind="jsonl_line",
+            next_checkpoint=next_checkpoint,
+            source_records_read=source_records_read,
+            output_rows_written=output_rows_written,
+            last_error=last_error[:1000],
+            version=version,
+        )
+
+    def insert_node_fills(
+        self,
+        column_names: Sequence[str],
+        columns: Sequence[Iterable[object]],
+    ) -> int:
+        query = "INSERT INTO %s (%s) VALUES" % (
+            self._table(NODE_FILLS_TABLE),
+            ", ".join(column_names),
+        )
+        return int(self.client.execute(query, columns, columnar=True))

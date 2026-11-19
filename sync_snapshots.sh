@@ -7,10 +7,10 @@ PYTHON="${PROJECT_DIR}/.venv/bin/python"
 CONFIG="${PROJECT_DIR}/config.toml"
 LOG_DIR="${PROJECT_DIR}/logs"
 RUN_DIR="${PROJECT_DIR}/.run"
-PID_FILE="${RUN_DIR}/hydromancer-sync.pid"
-STATE_FILE="${RUN_DIR}/hydromancer-sync.state"
-STOP_FILE="${RUN_DIR}/hydromancer-sync.stop"
-LOCK_FILE="${RUN_DIR}/hydromancer-sync.lock"
+PID_FILE="${RUN_DIR}/hyperliquid-etl-snapshots.pid"
+STATE_FILE="${RUN_DIR}/hyperliquid-etl-snapshots.state"
+STOP_FILE="${RUN_DIR}/hyperliquid-etl-snapshots.stop"
+LOCK_FILE="${RUN_DIR}/hyperliquid-etl-snapshots.lock"
 DEFAULT_DATASETS="perp,spot,account_values"
 
 usage() {
@@ -27,7 +27,7 @@ log() {
 }
 
 run_cli() {
-    PYTHONPATH="${PROJECT_DIR}/src" "${PYTHON}" -m hydro_snapshot.cli "$@" \
+    PYTHONPATH="${PROJECT_DIR}/src" "${PYTHON}" -m hyperliquid_etl.cli "$@" \
         --config "${CONFIG}"
 }
 
@@ -58,7 +58,7 @@ notify_lark() {
     message="$1"
     webhook="$(
         PYTHONPATH="${PROJECT_DIR}/src" "${PYTHON}" -c \
-            'import sys; from pathlib import Path; from hydro_snapshot.config import _load_toml; print(_load_toml(Path(sys.argv[1])).get("lark", {}).get("webhook_url", ""))' \
+            'import sys; from pathlib import Path; from hyperliquid_etl.config import _load_toml; print(_load_toml(Path(sys.argv[1])).get("lark", {}).get("webhook_url", ""))' \
             "${CONFIG}"
     )" || {
         log "Lark notification skipped: failed to read configuration"

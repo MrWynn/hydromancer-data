@@ -5,19 +5,19 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from hydro_snapshot.catalog import Catalog, S3Object
-from hydro_snapshot.clickhouse_store import ClickHouseStore
-from hydro_snapshot.config import (
+from hyperliquid_etl.catalog import Catalog, S3Object
+from hyperliquid_etl.clickhouse_store import ClickHouseStore
+from hyperliquid_etl.config import (
     AppConfig,
     AwsConfig,
     ClickHouseConfig,
     StorageConfig,
 )
-from hydro_snapshot.constants import ALLOWED_TABLES, DATASETS
-from hydro_snapshot.s3_store import S3Store
-from hydro_snapshot.cli import GIB, _cost_text, _exact_cost_text
-from hydro_snapshot.service import SnapshotService
-from hydro_snapshot.utils import date_range, format_bytes
+from hyperliquid_etl.constants import ALLOWED_TABLES, DATASETS
+from hyperliquid_etl.s3_store import S3Store
+from hyperliquid_etl.cli import GIB, _cost_text, _exact_cost_text
+from hyperliquid_etl.service import SnapshotService
+from hyperliquid_etl.utils import date_range, format_bytes
 
 
 TEST_DATE = date(2026, 11, 9)
@@ -272,7 +272,7 @@ class CoreTests(unittest.TestCase):
             ClickHouseStore(config)
         self.assertNotIn("settings", client_class.call_args.kwargs)
 
-    def test_allowlist_contains_only_four_project_tables(self):
+    def test_allowlist_contains_only_project_tables(self):
         self.assertEqual(
             ALLOWED_TABLES,
             {
@@ -280,6 +280,8 @@ class CoreTests(unittest.TestCase):
                 "hydromancer_snapshot_spot",
                 "hydromancer_snapshot_account_values",
                 "hydromancer_sync_tasks",
+                "hyperliquid_s3_ingestion_tasks",
+                "hyperliquid_s3_node_fills_by_block_fills",
             },
         )
 

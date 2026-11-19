@@ -10,11 +10,13 @@ except ModuleNotFoundError as exc:  # pragma: no cover
 
 from .config import load_config
 from .constants import DATASETS
+from .node_fills_cli import app as node_fills_app
 from .service import CostEstimate, ExactCost, InspectionRecord, SnapshotService
 from .utils import format_bytes
 
 
-app = typer.Typer(no_args_is_help=True, help="Hydromancer snapshot data tool")
+app = typer.Typer(no_args_is_help=True, help="Hyperliquid ETL data tool")
+app.add_typer(node_fills_app, name="node-fills")
 GIB = 1024 ** 3
 DEFAULT_USD_PER_GB = 0.0
 

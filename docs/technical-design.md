@@ -28,7 +28,7 @@ Hydromancer snapshot 文件名采用 `{block}_{timestamp_ms}.parquet`。部分�
 ### inspect
 
 ```bash
-hydro-snapshot inspect --from DATE --to DATE \
+hyperliquid-etl inspect --from DATE --to DATE \
   --dataset perp,spot,account_values [--refresh] [--format table|json]
 ```
 
@@ -37,7 +37,7 @@ hydro-snapshot inspect --from DATE --to DATE \
 ### download
 
 ```bash
-hydro-snapshot download --from DATE --to DATE [--dataset ...] [--yes]
+hyperliquid-etl download --from DATE --to DATE [--dataset ...] [--yes]
 ```
 
 下载前展示新增对象数和字节数。使用 `.part` 文件写入、校验 `ContentLength` 后原子改名。有效本地文件不会重复下载。
@@ -45,7 +45,7 @@ hydro-snapshot download --from DATE --to DATE [--dataset ...] [--yes]
 ### sync
 
 ```bash
-hydro-snapshot sync --from DATE --to DATE [--dataset ...] [--dry-run] [--yes]
+hyperliquid-etl sync --from DATE --to DATE [--dataset ...] [--dry-run] [--yes]
 ```
 
 同步首先查询 ClickHouse 任务表。状态为 `completed` 的 dataset/date 在任何 S3 请求前跳过；未完成任务从记录的 batch checkpoint 继续。未同步数据优先使用本地 Parquet；本地没有时只下载一次。
@@ -53,7 +53,7 @@ hydro-snapshot sync --from DATE --to DATE [--dataset ...] [--dry-run] [--yes]
 ### status
 
 ```bash
-hydro-snapshot status --from DATE --to DATE [--dataset ...]
+hyperliquid-etl status --from DATE --to DATE [--dataset ...]
 ```
 
 只查询项目任务表，不访问 S3；显示最新的 running/failed/completed 状态、逻辑写入行数、总行数、下一个 batch 和错误摘要。

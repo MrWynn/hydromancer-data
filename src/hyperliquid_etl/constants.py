@@ -48,8 +48,10 @@ DATASETS: Dict[str, DatasetSpec] = {
 }
 
 TASK_TABLE = "hydromancer_sync_tasks"
+INGESTION_TASK_TABLE = "hyperliquid_s3_ingestion_tasks"
+NODE_FILLS_TABLE = "hyperliquid_s3_node_fills_by_block_fills"
 ALLOWED_TABLES = frozenset(
-    [TASK_TABLE]
+    [TASK_TABLE, INGESTION_TASK_TABLE, NODE_FILLS_TABLE]
     + [spec.target_table for spec in DATASETS.values()]
 )
 

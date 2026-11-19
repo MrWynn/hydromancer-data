@@ -1,6 +1,10 @@
-# Hydromancer Snapshot Tool
+# Hyperliquid ETL
 
-用于将 Hydromancer Reservoir 日快照同步到 ClickHouse，支持以下 dataset：
+用于将 Hyperliquid 生态数据导入 ClickHouse。目前支持 Hydromancer Reservoir 日快照和 Hyperliquid 官方 S3 node fills。
+
+## Hydromancer 日快照
+
+支持以下 dataset：
 
 - `perp`：永续合约持仓
 - `spot`：现货余额
@@ -15,7 +19,7 @@
 同步较长日期范围前，可以抽样查询 S3 对象大小并估算总下载量：
 
 ```bash
-hydro-snapshot cost \
+hyperliquid-etl cost \
   --dataset perp \
   --start 2026-11-01 \
   --end 2026-11-30
@@ -24,7 +28,7 @@ hydro-snapshot cost \
 命令抽样起始日、中间日和结束日，再外推整个日期范围。它只执行 Requester Pays S3 LIST，不下载 Parquet，也不访问 ClickHouse。当前 S3 bucket 与运行工具的 EC2 位于同一 AWS Region，因此默认数据传输费率为 `$0/GB`。如果以后改为跨 Region 或下载到 AWS 之外，可通过 `--usd-per-gb` 传入对应费率：
 
 ```bash
-hydro-snapshot cost \
+hyperliquid-etl cost \
   --dataset perp \
   --start 2026-11-01 \
   --end 2026-11-30 \
@@ -34,7 +38,7 @@ hydro-snapshot cost \
 如需逐日列举 S3 并精确统计当前已有对象的压缩大小，可使用 `--exact`。该模式不会将未来日期或可能尚未发布的日期按零数据计入平均值，也不会下载 Parquet：
 
 ```bash
-hydro-snapshot cost \
+hyperliquid-etl cost \
   --dataset perp \
   --start 2026-11-01 \
   --end 2026-11-30 \
@@ -48,7 +52,7 @@ hydro-snapshot cost \
 同步前可以检查指定日期的数据是否存在、对象大小、快照 block 以及本地是否已有缓存：
 
 ```bash
-hydro-snapshot inspect \
+hyperliquid-etl inspect \
   --from 2026-11-10 \
   --to 2026-11-10 \
   --dataset perp,spot,account_values
@@ -57,7 +61,7 @@ hydro-snapshot inspect \
 加入 `--refresh` 会忽略本地 S3 列举缓存并重新查询源数据：
 
 ```bash
-hydro-snapshot inspect \
+hyperliquid-etl inspect \
   --from 2026-11-10 \
   --to 2026-11-10 \
   --refresh
@@ -70,7 +74,7 @@ hydro-snapshot inspect \
 正式写入前先执行 dry-run：
 
 ```bash
-hydro-snapshot sync \
+hyperliquid-etl sync \
   --from 2026-11-10 \
   --to 2026-11-10 \
   --dataset perp,spot,account_values \
@@ -84,7 +88,7 @@ hydro-snapshot sync \
 确认计划后执行：
 
 ```bash
-hydro-snapshot sync \
+hyperliquid-etl sync \
   --from 2026-11-10 \
   --to 2026-11-10 \
   --dataset perp,spot,account_values \
@@ -106,7 +110,7 @@ hydro-snapshot sync \
 ### 4. 查询同步状态
 
 ```bash
-hydro-snapshot status \
+hyperliquid-etl status \
   --from 2026-11-10 \
   --to 2026-11-10 \
   --dataset perp,spot,account_values
@@ -124,7 +128,7 @@ hydro-snapshot status \
 同步连续日期范围：
 
 ```bash
-hydro-snapshot sync \
+hyperliquid-etl sync \
   --from 2026-11-01 \
   --to 2026-11-10 \
   --dry-run
@@ -133,7 +137,7 @@ hydro-snapshot sync \
 只同步一个 dataset：
 
 ```bash
-hydro-snapshot sync \
+hyperliquid-etl sync \
   --from 2026-11-10 \
   --to 2026-11-10 \
   --dataset perp \
@@ -149,6 +153,49 @@ hydro-snapshot sync \
 正式表使用 `ReplacingMergeTree(updated_at)` 处理 batch 重试产生的相同排序键记录。后台 merge 完成前，如果查询必须严格去重，请使用 `FINAL`。
 
 完整实现与数据表设计见 [docs/technical-design.md](docs/technical-design.md)。
+
+## Hyperliquid node fills
+
+`node_fills_by_block` 使用独立子命令，日期按 UTC 解释且包含首尾日期。先手动执行 [sql/node_fills_by_block_tables.sql](sql/node_fills_by_block_tables.sql) 创建项目表。
+
+检查真实 S3 对象并刷新本地清单：
+
+```bash
+hyperliquid-etl node-fills inspect \
+  --from 2026-11-01 \
+  --to 2026-11-01 \
+  --refresh
+```
+
+预览下载和恢复位置，不下载、不写 ClickHouse：
+
+```bash
+hyperliquid-etl node-fills sync \
+  --from 2026-11-01 \
+  --to 2026-11-01 \
+  --dry-run
+```
+
+确认 Requester Pays 费用并同步：
+
+```bash
+hyperliquid-etl node-fills sync \
+  --from 2026-11-01 \
+  --to 2026-11-01 \
+  --yes
+```
+
+查看对象级 checkpoint 和状态：
+
+```bash
+hyperliquid-etl node-fills status \
+  --from 2026-11-01 \
+  --to 2026-11-01
+```
+
+同步按日期、小时顺序处理。完成对象再次执行时会直接跳过；失败对象从最近一次成功写入的 JSONL 行恢复。LZ4 文件缓存在 `storage.cache_dir` 下，S3 扫描和下载状态记录在现有 SQLite catalog 中。
+
+完整数据模型、幂等边界和验收方式见 [docs/node-fills-by-block-design.md](docs/node-fills-by-block-design.md)。
 
 ## 后台同步脚本
 
